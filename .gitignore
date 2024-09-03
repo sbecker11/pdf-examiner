@@ -2,6 +2,7 @@
 
 #standard
 venv/
+tokens.txt
 
 # dependencies
 /node_modules
