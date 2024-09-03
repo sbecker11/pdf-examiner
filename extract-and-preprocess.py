@@ -1,77 +1,82 @@
-import sys
 import os
-import PyPDF2
+import requests
 from datetime import datetime
+from PyPDF2 import PdfFileReader
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, Trainer, TrainingArguments
+from datasets import Dataset
 import nltk
-
-# Ensure necessary NLTK data is downloaded
-nltk.download('punkt')
-nltk.download('stopwords')
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
+from huggingface_hub import login
 
-def preprocess_text(text):
-    # Tokenize the text
-    tokens = word_tokenize(text.lower())
+# authentidcate with Hugging Face
+login()
 
-    # Remove stopwords and punctuation
-    stop_words = set(stopwords.words('english'))
-    tokens = [token for token in tokens if token.isalnum() and token not in stop_words]
-    
-    print(f"Number of tokens: {len(tokens)}")
-    return tokens
+# Define paths
+DEFAULT_FOLDER_PATH = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/Books")
+log_file = "./success_log.txt"
+error_log_file = "./error_log.txt"
 
-def extract_text_from_pdf(pdf_path):
-    with open(pdf_path, 'rb') as file:
-        reader = PyPDF2.PdfReader(file)
-        text = ''
-        for page in reader.pages:
-            text += page.extract_text()
-    return text
+# Download NLTK data
+nltk.download('punkt')
+nltk.download('stopwords')
 
-def process_pdf_file(pdf_path):
-    text = extract_text_from_pdf(pdf_path)
-    tokens = preprocess_text(text)
-    return text, tokens
+# Function to list all PDF files in the folder
+def list_pdf_files(folder):
+    return [f for f in os.listdir(folder) if f.endswith('.pdf')]
 
-def read_processed_log(log_file, error_log_file):
+# Function to read log files and get processed files
+def read_processed_log(success_log, error_log):
     processed_files = set()
-    
-    if os.path.exists(log_file):
-        with open(log_file, 'r') as lf:
-            processed_files.update(line.split(',')[0] for line in lf.read().splitlines())
-    
-    if os.path.exists(error_log_file):
-        with open(error_log_file, 'r') as ef:
-            processed_files.update(line.split(',')[0] for line in ef.read().splitlines())
-    
-    print(f"Found {len(processed_files)} files already processed.")
+    if os.path.exists(success_log):
+        with open(success_log, 'r') as f:
+            processed_files.update(line.split(',')[0] for line in f.readlines())
+    if os.path.exists(error_log):
+        with open(error_log, 'r') as f:
+            processed_files.update(line.split(',')[0] for line in f.readlines())
     return processed_files
 
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: python extract-and-preprocess.py <folder_path> <tokens_file>")
-        sys.exit(1)
-    
-    folder_path = sys.argv[1]
-    tokens_file = sys.argv[2]
-    log_file = 'processed_files.log'
-    error_log_file = 'error_files.log'
-    
-    DEFAULT_FOLDER_PATH = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/Books")
-    DEFAULT_TOKENS_FILE = os.path.join(os.getcwd(), "tokens.txt")
-    
-    if folder_path in ['default', '-']:
-        folder_path = DEFAULT_FOLDER_PATH
-    if tokens_file in ['default', '-']:        
-        tokens_file = DEFAULT_TOKENS_FILE
+# Function to extract text from a PDF file
+def extract_text_from_pdf(pdf_file):
+    with open(pdf_file, 'rb') as f:
+        reader = PdfFileReader(f)
+        text = ""
+        for page_num in range(reader.numPages):
+            text += reader.getPage(page_num).extract_text()
+    return text
 
-    if not os.path.exists(folder_path):
-        print(f"Error: The folder '{folder_path}' does not exist.")
-        sys.exit(1)
+# Function to preprocess text using NLTK
+def preprocess_text(text):
+    tokens = word_tokenize(text)
+    tokens = [word for word in tokens if word.isalnum()]  # Remove punctuation
+    stop_words = set(stopwords.words('english'))
+    tokens = [word for word in tokens if word.lower() not in stop_words]  # Remove stopwords
+    return tokens
 
-    pdf_files = [f for f in os.listdir(folder_path) if f.endswith('.pdf')]
-    print(f"Found {len(pdf_files)} PDF files in the folder '{folder_path}'.")
+# Function to tokenize text using Hugging Face tokenizer
+def tokenize_text(tokens, tokenizer):
+    return tokenizer(' '.join(tokens), padding="max_length", truncation=True, max_length=512)["input_ids"]
+
+# Load the selected model and tokenizer from Hugging Face Hub
+model_name = "AWS-Sage"
+tokenizer = GPT2Tokenizer.from_pretrained(model_name, use_auth_token=True)
+model = GPT2LMHeadModel.from_pretrained(model_name, use_auth_token=True)
+
+# Define training arguments
+training_args = TrainingArguments(
+    output_dir="./results",
+    overwrite_output_dir=True,
+    num_train_epochs=1,
+    per_device_train_batch_size=4,
+    save_steps=10_000,
+    save_total_limit=2,
+    push_to_hub=False  # Set to False since we are not pushing to the hub in this script
+)
+
+# Main processing function
+def process_pdfs():
+    pdf_files = list_pdf_files(DEFAULT_FOLDER_PATH)
+    print(f"Found {len(pdf_files)} PDF files in the folder '{DEFAULT_FOLDER_PATH}'.")
 
     processed_files = read_processed_log(log_file, error_log_file)
     total_tokens = 0
@@ -81,28 +86,32 @@ def main():
             print(f"Skipping already processed file: {pdf_file}")
             continue
         
-        pdf_path = os.path.join(folder_path, pdf_file)
+        pdf_path = os.path.join(DEFAULT_FOLDER_PATH, pdf_file)
         try:
-            print(f"Processing '{pdf_file}'...")
-            text, tokens = process_pdf_file(pdf_path)
-            num_tokens = len(tokens)
-            num_chars = len(text)
-            num_words = len(text.split())
+            text = extract_text_from_pdf(pdf_path)
+            tokens = preprocess_text(text)
+            tokenized_input = tokenize_text(tokens, tokenizer)
+            dataset = Dataset.from_dict({"input_ids": [tokenized_input]})
             
-            with open(tokens_file, 'a') as tf:
-                tf.write(' '.join(tokens) + '\n')
+            # Train the model incrementally
+            trainer = Trainer(
+                model=model,
+                args=training_args,
+                train_dataset=dataset,
+            )
+            trainer.train()
             
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            with open(log_file, 'a') as lf:
-                lf.write(f"{pdf_file},{timestamp},{num_chars},{num_words},{num_tokens}\n")
+            # Save the model after each batch
+            model.save_pretrained("./results")
+            tokenizer.save_pretrained("./results")
             
-            total_tokens += num_tokens
-            print(f"Processed '{pdf_file}': {num_tokens} tokens added. Total tokens: {total_tokens}")
+            with open(log_file, 'a') as sf:
+                sf.write(f"{pdf_file},{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            print(f"Processed '{pdf_file}': {len(tokens)} tokens sent.")
         except Exception as e:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             with open(error_log_file, 'a') as ef:
-                ef.write(f"{pdf_file},{timestamp},{str(e)}\n")
+                ef.write(f"{pdf_file},{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{str(e)}\n")
             print(f"Error processing '{pdf_file}': {str(e)}")
 
 if __name__ == "__main__":
-    main()
+    process_pdfs()

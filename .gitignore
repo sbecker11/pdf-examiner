@@ -3,6 +3,7 @@
 #standard
 venv/
 tokens.txt
+junk/
 
 # dependencies
 /node_modules

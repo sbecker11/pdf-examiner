@@ -40,3 +40,19 @@ python -m nltk.downloader all
 
 mkdir /usr/local/share/nltk_data
 export NLTK_DATA=/usr/local/share/nltk_data
+
+
+
+# Preprocessing Explanation:
+1. Authenticate with Hugging Face: The login function from huggingface_hub is called at the beginning of the script to ensure you are authenticated.
+2. Download NLTK Data: The necessary NLTK data files (punkt and stopwords) are downloaded.
+3. List PDF Files: The list_pdf_files function lists all PDF files in the specified folder.
+4. Read Processed Logs: The read_processed_log function reads the success and error log files to get the list of processed files.
+5. Extract and Preprocess Text: The script extracts text from each unprocessed PDF file and preprocesses it using NLTK.
+6. Tokenize Text: The preprocessed text is tokenized using the Hugging Face tokenizer.
+7. Incremental Training: The script sets up a Trainer with the loaded model and tokenized dataset, and trains the model incrementally for each unprocessed PDF file.
+8. Save Model State: After processing each batch, the model and tokenizer are saved to ensure that the training state is maintained.
+9. Logging: The script logs successful processing and errors to the respective log files.
+
+By following these steps, you can ensure that your script includes the necessary authentication and text preprocessing steps, and that it handles incremental training effectively.
+
