@@ -29,7 +29,7 @@ To push the current branch and set the remote as upstream, use
 To have this happen automatically for branches without a tracking
 upstream, see 'push.autoSetupRemote' in 'git help config'.
 
-This article solved my Git Push RPC error:
+This article saved my life, explaining how to resolve the git push RPC error.
 https://medium.com/swlh/everything-you-need-to-know-to-resolve-the-git-push-rpc-error-1a865fd1ebea
 
 ### Pre-Installation steps:
